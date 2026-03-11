@@ -13,6 +13,7 @@ __pycache__/
 # Virtual Environment
 venv/
 .venv/
+.venv*/
 env/
 ENV/
 
@@ -24,6 +25,7 @@ ENV/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store

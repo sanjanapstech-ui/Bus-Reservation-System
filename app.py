@@ -2,6 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from datetime import datetime
+from functools import wraps
+from urllib.parse import urlparse, unquote
 import qrcode
 from io import BytesIO
 import json
@@ -16,9 +18,118 @@ try:
 except ImportError:
     pass  # python-dotenv not available, use system environment variables
 
+
+def is_production_env() -> bool:
+    env = (os.getenv("ENV") or os.getenv("FLASK_ENV") or "").strip().lower()
+    if env in {"development", "dev", "local"}:
+        return False
+    if env in {"production", "prod"}:
+        return True
+
+    # Heuristics for common deployment platforms
+    return bool(
+        os.getenv("RENDER")
+        or os.getenv("RENDER_SERVICE_ID")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or os.getenv("VERCEL")
+        or os.getenv("VERCEL_ENV")
+        or os.getenv("VERCEL_URL")
+    )
+
+
 app = Flask(__name__)
-# Secret key is required for sessions - use a default if not set (not secure for production!)
-app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# Secret key is required for sessions
+_secret_key = os.getenv("SECRET_KEY")
+if not _secret_key:
+    # If the app is imported (gunicorn/serverless), don't allow an insecure default.
+    # For `python app.py` local dev, fall back to a fixed dev key.
+    if __name__ != "__main__":
+        raise RuntimeError(
+            "SECRET_KEY environment variable must be set. "
+            "For local dev, copy .env.example to .env. For production, set it in your hosting dashboard."
+        )
+    _secret_key = "dev-secret-key-change-in-production"
+app.secret_key = _secret_key
+
+# Cookie hardening
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=is_production_env(),
+)
+
+
+def require_diagnostics_token(view_func):
+    """Protect diagnostics routes in production.
+
+    In debug mode, access is always allowed. In production, set DIAGNOSTICS_TOKEN and
+    pass it via `?token=...` or `X-DIAGNOSTICS-TOKEN` header.
+    """
+
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if app.debug:
+            return view_func(*args, **kwargs)
+
+        token = os.getenv("DIAGNOSTICS_TOKEN")
+        if not token:
+            return ("Not Found", 404)
+
+        provided = (
+            request.headers.get("X-DIAGNOSTICS-TOKEN")
+            or request.headers.get("X-DIAGNOSTICS_TOKEN")
+            or request.args.get("token")
+        )
+        if provided != token:
+            return ("Not Found", 404)
+
+        return view_func(*args, **kwargs)
+
+    return wrapper
+
+
+def require_debug_mode(view_func):
+    """Disable debug-only routes in production."""
+
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if not app.debug:
+            return ("Not Found", 404)
+        return view_func(*args, **kwargs)
+
+    return wrapper
+
+
+def env_first(*names, default=None):
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
+def parse_mysql_url(mysql_url):
+    """Parse a MySQL URL like: mysql://user:pass@host:3306/dbname"""
+    if not mysql_url:
+        return None
+
+    try:
+        parsed = urlparse(mysql_url)
+    except Exception:
+        return None
+
+    if parsed.scheme not in {"mysql", "mysql+pymysql"}:
+        return None
+
+    database = parsed.path.lstrip("/") if parsed.path else ""
+    return {
+        "host": parsed.hostname,
+        "port": parsed.port or 3306,
+        "user": unquote(parsed.username) if parsed.username else None,
+        "password": unquote(parsed.password) if parsed.password is not None else None,
+        "database": database or None,
+    }
 
 # MySQL Configuration using PyMySQL
 class MySQL:
@@ -47,8 +158,7 @@ class MySQL:
         """Create a new database connection"""
         try:
             # Check if we're in production and database config is missing
-            is_production = os.getenv('RENDER') or os.getenv('VERCEL') or not os.getenv('FLASK_ENV') == 'development'
-            if is_production and self.config.get('host') == 'localhost':
+            if is_production_env() and self.config.get('host') in {'localhost', '127.0.0.1', '::1'}:
                 raise ConnectionError(
                     "Database configuration error: In production, MYSQL_HOST environment variable must be set. "
                     "Please set MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, and MYSQL_DB in your deployment environment."
@@ -61,7 +171,7 @@ class MySQL:
             print(f"MySQL connection error: {error_msg}")
             # Provide helpful error messages
             if 'Connection refused' in error_msg or 'Can\'t connect' in error_msg:
-                if self.config.get('host') == 'localhost':
+                if self.config.get('host') in {'localhost', '127.0.0.1', '::1'}:
                     raise ConnectionError(
                         "Cannot connect to database on localhost. "
                         "In production, you must set MYSQL_HOST environment variable to your database server address. "
@@ -128,11 +238,31 @@ class MySQL:
 # MySQL Configuration
 # In production (Render/Vercel), these MUST be set as environment variables
 # For local development, you can use .env file or defaults
-app.config['MYSQL_HOST'] = os.getenv('MYSQL_HOST') or os.getenv('DB_HOST') or 'localhost'
-app.config['MYSQL_USER'] = os.getenv('MYSQL_USER') or os.getenv('DB_USER') or 'root'
-app.config['MYSQL_PASSWORD'] = os.getenv('MYSQL_PASSWORD') or os.getenv('DB_PASSWORD') or '1239'
-app.config['MYSQL_DB'] = os.getenv('MYSQL_DB') or os.getenv('DB_NAME') or 'bus_management'
-app.config['MYSQL_PORT'] = int(os.getenv('MYSQL_PORT') or os.getenv('DB_PORT') or 3306)
+_mysql_url = env_first("MYSQL_URL", "DATABASE_URL")
+_mysql_url_parts = parse_mysql_url(_mysql_url)
+
+app.config['MYSQL_HOST'] = (
+    (_mysql_url_parts.get("host") if _mysql_url_parts else None)
+    or env_first("MYSQL_HOST", "MYSQLHOST", "DB_HOST", "DBHOST", default="localhost")
+)
+app.config['MYSQL_USER'] = (
+    (_mysql_url_parts.get("user") if _mysql_url_parts else None)
+    or env_first("MYSQL_USER", "MYSQLUSER", "DB_USER", "DBUSER", default="root")
+)
+_mysql_url_password = _mysql_url_parts.get("password") if _mysql_url_parts else None
+app.config['MYSQL_PASSWORD'] = (
+    _mysql_url_password
+    if _mysql_url_password is not None
+    else env_first("MYSQL_PASSWORD", "MYSQLPASSWORD", "DB_PASSWORD", "DBPASSWORD", default="")
+)
+app.config['MYSQL_DB'] = (
+    (_mysql_url_parts.get("database") if _mysql_url_parts else None)
+    or env_first("MYSQL_DB", "MYSQLDATABASE", "DB_NAME", "DBNAME", default="bus_management")
+)
+app.config['MYSQL_PORT'] = int(
+    (_mysql_url_parts.get("port") if _mysql_url_parts else None)
+    or env_first("MYSQL_PORT", "MYSQLPORT", "DB_PORT", "DBPORT", default=3306)
+)
 
 mysql = MySQL(app)
 
@@ -167,12 +297,59 @@ def init_db():
     with app.app_context():
         cur = mysql.connection.cursor()
         try:
-            # Drop existing transactions table if it exists
-            cur.execute('DROP TABLE IF EXISTS transactions')
-            
-            # Create transactions table
+            # Core tables
             cur.execute('''
-                CREATE TABLE transactions (
+                CREATE TABLE IF NOT EXISTS `user` (
+                    `id` INT NOT NULL AUTO_INCREMENT,
+                    `usn` VARCHAR(20) NOT NULL,
+                    `name` VARCHAR(100) NOT NULL,
+                    `phone` VARCHAR(15) NOT NULL,
+                    `email` VARCHAR(100) NOT NULL,
+                    `password` VARCHAR(255) NOT NULL,
+                    `bus_number` VARCHAR(20) DEFAULT NULL,
+                    `address` TEXT NOT NULL,
+                    `distance` FLOAT DEFAULT NULL,
+                    `balance` DECIMAL(10,2) DEFAULT 0.00,
+                    PRIMARY KEY (`id`),
+                    UNIQUE KEY `usn` (`usn`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ''')
+
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS `bus` (
+                    `id` INT NOT NULL AUTO_INCREMENT,
+                    `bus_number` VARCHAR(20) NOT NULL,
+                    `starting_point` VARCHAR(100) NOT NULL,
+                    `ending_point` VARCHAR(100) NOT NULL,
+                    `available_seats` INT NOT NULL,
+                    `total_seats` INT NOT NULL,
+                    `fare` DECIMAL(10,2) NOT NULL,
+                    PRIMARY KEY (`id`),
+                    UNIQUE KEY `bus_number` (`bus_number`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ''')
+
+            # Seed bus routes for demos (only inserts if missing)
+            default_buses = [
+                ("1", "Kundapura", "SMVITM College", 10, 40, 30.00),
+                ("2", "Udupi", "SMVITM College", 7, 35, 20.00),
+                ("3", "Manipal", "SMVITM College", 20, 45, 25.00),
+                ("4", "Brahmavar", "SMVITM College", 6, 40, 28.00),
+                ("5", "Mangalore", "SMVITM College", 15, 50, 35.00),
+            ]
+            for bus in default_buses:
+                cur.execute(
+                    '''
+                    INSERT IGNORE INTO `bus`
+                    (bus_number, starting_point, ending_point, available_seats, total_seats, fare)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ''',
+                    bus,
+                )
+
+            # Create transactions table (never drop in app runtime)
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS transactions (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT NOT NULL,
                     amount DECIMAL(10,2) NOT NULL,
@@ -181,8 +358,21 @@ def init_db():
                     bus_number VARCHAR(20),
                     location VARCHAR(100),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES user(id)
+                    FOREIGN KEY (user_id) REFERENCES `user`(id)
                 )
+            ''')
+
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS notification (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    message TEXT NOT NULL,
+                    is_read TINYINT(1) DEFAULT 0,
+                    requires_response TINYINT(1) DEFAULT 0,
+                    response VARCHAR(10) DEFAULT NULL,
+                    KEY user_id (user_id),
+                    CONSTRAINT notification_ibfk_1 FOREIGN KEY (user_id) REFERENCES `user`(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             ''')
 
             # Create feedback table
@@ -194,13 +384,18 @@ def init_db():
                     rating INT NOT NULL,
                     feedback_text TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES user(id)
+                    FOREIGN KEY (user_id) REFERENCES `user`(id)
                 )
             ''')
             mysql.connection.commit()
             print("Database tables initialized successfully")
         except Exception as e:
             print(f"Error creating tables: {str(e)}")
+            try:
+                mysql.connection.rollback()
+            except Exception:
+                pass
+            raise
         finally:
             cur.close()
 
@@ -228,7 +423,7 @@ def before_request():
     # Skip for static files and simple routes
     # Wrap in try-except to prevent function invocation failures
     try:
-        if request.endpoint and request.endpoint not in ['static', 'generate_qr']:
+        if request.endpoint and request.endpoint not in ['static', 'generate_qr', 'index']:
             ensure_db_initialized()
     except Exception as e:
         # Log error but don't fail the request - let individual routes handle DB errors
@@ -591,10 +786,8 @@ def view_transactions():
                 'created_at': t[6]
             }
             transactions.append(transaction)
-            print(f"Found transaction: {transaction}")  # Debug logging
         
         if not transactions:
-            print("No transactions found for user")  # Debug logging
             flash('No transactions found', 'info')
         
         return render_template('transaction.html', transactions=transactions)
@@ -769,7 +962,10 @@ def scan_qr():
         
     except Exception as e:
         print(f"Error in scan_qr: {str(e)}")
-        return jsonify({'success': False, 'message': f'Error processing QR code: {str(e)}'})
+        message = "Error processing QR code. Please try again."
+        if not is_production_env():
+            message = f"Error processing QR code: {str(e)}"
+        return jsonify({'success': False, 'message': message})
 
 @app.route('/view-qr-code')
 def view_qr_code():
@@ -788,20 +984,33 @@ def respond_notification():
     cur = mysql.connection.cursor()
     try:
         if response == 'yes':
-            # Check if seats are available
-            cur.execute('SELECT available_seats FROM bus WHERE bus_number = %s', (session.get('bus_number'),))
-            available_seats = cur.fetchone()[0]
-            
-            if available_seats > 0:
-                # Update available seats
-                cur.execute('UPDATE bus SET available_seats = available_seats - 1 WHERE bus_number = %s', 
-                          (session.get('bus_number'),))
+            bus_number = session.get('bus_number')
+            cur.execute(
+                'SELECT starting_point, ending_point FROM bus WHERE bus_number = %s',
+                (bus_number,),
+            )
+            bus_row = cur.fetchone()
+            if not bus_row:
+                flash('Bus not found', 'error')
+                return redirect(url_for('notification'))
+
+            route_from, route_to = bus_row[0], bus_row[1]
+
+            # Try to reserve a seat atomically
+            cur.execute(
+                'UPDATE bus SET available_seats = available_seats - 1 WHERE bus_number = %s AND available_seats > 0',
+                (bus_number,),
+            )
+
+            if cur.rowcount == 1:
                 mysql.connection.commit()
                 flash('Your seat has been confirmed!', 'success')
             else:
                 # Show alternative buses
-                cur.execute('SELECT * FROM bus WHERE route_from = %s AND route_to = %s AND bus_number != %s AND available_seats > 0', 
-                          (session.get('route_from'), session.get('route_to'), session.get('bus_number')))
+                cur.execute(
+                    'SELECT * FROM bus WHERE starting_point = %s AND ending_point = %s AND bus_number != %s AND available_seats > 0',
+                    (route_from, route_to, bus_number),
+                )
                 alternative_buses = cur.fetchall()
                 flash('Your regular bus is full. Please select an alternative bus.', 'warning')
                 return render_template('notification.html', alternative_buses=alternative_buses)
@@ -825,14 +1034,16 @@ def select_alternative_bus(bus_number):
     cur = mysql.connection.cursor()
     try:
         # Check if seats are available in the alternative bus
-        cur.execute('SELECT available_seats FROM bus WHERE bus_number = %s', (bus_number,))
-        available_seats = cur.fetchone()[0]
-        
-        if available_seats > 0:
-            # Update available seats
-            cur.execute('UPDATE bus SET available_seats = available_seats - 1 WHERE bus_number = %s', 
-                      (bus_number,))
+        cur.execute(
+            'UPDATE bus SET available_seats = available_seats - 1 WHERE bus_number = %s AND available_seats > 0',
+            (bus_number,),
+        )
+
+        if cur.rowcount == 1:
+            # Assign the user to the alternative bus
+            cur.execute('UPDATE user SET bus_number = %s WHERE id = %s', (bus_number, session['user_id']))
             mysql.connection.commit()
+            session['bus_number'] = str(bus_number)
             flash(f'Successfully booked seat in Bus {bus_number}!', 'success')
         else:
             flash('Sorry, this bus is now full. Please try another alternative.', 'error')
@@ -869,6 +1080,7 @@ def notification():
         cur.close()
 
 @app.route('/test-db')
+@require_diagnostics_token
 def test_db():
     """Test database connection and show diagnostic information"""
     diagnostic_info = {
@@ -934,6 +1146,7 @@ def test_db():
         return jsonify(diagnostic_info), 500
 
 @app.route('/db-config')
+@require_diagnostics_token
 def db_config():
     """Show database configuration (without sensitive data) - for debugging"""
     config_info = {
@@ -961,6 +1174,7 @@ def db_config():
     return jsonify(config_info)
 
 @app.route('/view-db')
+@require_debug_mode
 def view_db():
     if 'user_id' not in session:
         return redirect(url_for('login'))
@@ -991,6 +1205,7 @@ def view_db():
         cur.close()
 
 @app.route('/print-db')
+@require_debug_mode
 def print_db():
     if 'user_id' not in session:
         return redirect(url_for('login'))
@@ -1066,7 +1281,10 @@ def handle_exception(e):
     # This prevents FUNCTION_INVOCATION_FAILED errors on Vercel
     try:
         if request.is_json or request.path.startswith('/api/'):
-            return jsonify({'error': 'An error occurred', 'message': str(e)}), 500
+            message = "An unexpected error occurred."
+            if not is_production_env():
+                message = str(e)
+            return jsonify({'error': 'An error occurred', 'message': message}), 500
         flash('An error occurred. Please try again.', 'error')
         return redirect(url_for('index'))
     except Exception:

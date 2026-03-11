@@ -46,6 +46,7 @@ pip install -r requirements.txt
 - For local dev: copy `.env.example` to `.env` and fill in values
 - For production: set these in your hosting provider dashboard:
   - `SECRET_KEY`
+  - (Recommended) `MYSQL_URL` (format: `mysql://user:password@host:port/dbname`)
   - `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`, `MYSQL_PORT`
   - (Optional) `DIAGNOSTICS_TOKEN` to protect `/test-db` and `/db-config`
 

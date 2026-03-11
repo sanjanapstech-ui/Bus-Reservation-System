@@ -1,3 +1,4 @@
+USE railway;
 -- MySQL dump 10.13  Distrib 8.0.21, for Win64 (x86_64)
 --
 -- Host: localhost    Database: bus_management
@@ -44,7 +45,7 @@ CREATE TABLE `user` (
 
 LOCK TABLES `user` WRITE;
 /*!40000 ALTER TABLE `user` DISABLE KEYS */;
-INSERT INTO `user` VALUES (1,'4MW23AI045','dfgdsf','9343434343','sss@gmail.com','scrypt:32768:8:1$mwOrY9iDrmf3rETN$3d8370aa22b5c7071eda3544d3927aaa7ccb3a11b685ffa8fba26961b07e9be1e9d9b776160962cf36b1f0b53fe49838bcf8d7adc59c4e8078ea4a86c285f090','1','udupi',8.5,1540.00),(2,'4MW23AI090','Sanjana','8310718550','sanjanaps2005@gmail.com','scrypt:32768:8:1$yls0GROAyO1qFKkX$1e728d680cc6ee2b2b2f964b70ae9d6d088f407fd6759d6e681ddaaac5600995fc2825b16300c2786b5b96cc0b3cb6f40c5a081d76e23bf454a38081277439a2','2','Udupi',8.5,3250.00),(5,'4MW23AI048','felixxxx','9343434343','felix@gmail.com','scrypt:32768:8:1$eVBgiE4GgHQl4Vgv$4753b0017a083b3d9816592c102f1cecf24c00f9bf98fe9bdc165565ae17809e292bf4357b5fca78da830374c099c28b7b62c51a5919d60130973169036ff280','2','Udupi',8.5,310.00),(6,'4MW23AI095','Arun','8796545452','arun@gmail.com','scrypt:32768:8:1$SauZug1HDdXXI8ZI$9dc36e196c91aebb3b5a875de875a60bf05289ff36d050cacc2b7489febc216ce910e3599906c7da8a269be42c3b7791d4700edcbfe3e9853a3ba84ddcf754e0','1','Kundapura',30,50070.00);
+-- NOTE: Sample users removed for public repo. Create accounts via the app (Register page).
 /*!40000 ALTER TABLE `user` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;

@@ -1,3 +1,4 @@
+USE railway;
 -- MySQL dump 10.13  Distrib 8.0.21, for Win64 (x86_64)
 --
 -- Host: localhost    Database: bus_management
@@ -43,7 +44,7 @@ CREATE TABLE `transactions` (
 
 LOCK TABLES `transactions` WRITE;
 /*!40000 ALTER TABLE `transactions` DISABLE KEYS */;
-INSERT INTO `transactions` VALUES (1,6,50000.00,'credit','Top up via UPI','N/A','N/A','2025-05-29 05:42:49'),(2,6,30.00,'debit','Bus fare payment - Udupi','1','Udupi','2025-05-29 05:43:31'),(3,6,100.00,'credit','Top up via UPI','N/A','N/A','2025-05-29 05:57:15'),(4,2,100.00,'credit','Top up via UPI','N/A','N/A','2025-05-29 06:03:24'),(5,2,30.00,'debit','Bus fare payment - Udupi','1','Udupi','2025-05-29 06:04:15');
+-- NOTE: Sample transactions removed for public repo. Transactions will be created by the app.
 /*!40000 ALTER TABLE `transactions` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;

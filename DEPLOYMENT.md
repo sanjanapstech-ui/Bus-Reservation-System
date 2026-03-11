@@ -1,104 +1,63 @@
 # Database Configuration for Deployment
 
 ## Problem
-If you see the error: `"Can't connect to MySQL server on 'localhost' (Connection refused)"`, this means your application is trying to connect to a database on localhost, which won't work in production.
+If you see: `"Can't connect to MySQL server on 'localhost' (Connection refused)"`, your app is trying to connect to a database on `localhost`.
 
-## Solution: Set Environment Variables
+On Render/Vercel, `localhost` means **inside the deployed container/function**, not your laptop. So your app needs a database server that is reachable from the internet (or from the same private network).
 
-### For Render.com:
+## Important: MySQL vs MySQL Workbench
+- **MySQL Workbench is only a GUI client.** It does not run the database.
+- What must be running is the **MySQL Server** (`mysqld`) that your deployed app can reach.
+- For deployment, use a **cloud/managed MySQL database** (Railway, Aiven, DigitalOcean, AWS RDS, etc.) that stays online 24/7.
 
-1. **Go to your Render Dashboard**
-   - Navigate to your Web Service
-   - Click on "Environment" in the left sidebar
+## Solution: set environment variables
+You must set `SECRET_KEY` and your database connection values in your hosting dashboard.
 
-2. **Add these Environment Variables:**
-   ```
-   MYSQL_HOST=your-database-host.render.com
-   MYSQL_USER=your-database-user
-   MYSQL_PASSWORD=your-database-password
-   MYSQL_DB=bus_management
-   MYSQL_PORT=3306
-   ```
+### Option A (recommended): `MYSQL_URL`
+Set a single connection URL:
+```
+SECRET_KEY=your-random-secret-key
+MYSQL_URL=mysql://user:password@hostname:3306/database
+```
 
-   **OR** (alternative names also supported):
-   ```
-   DB_HOST=your-database-host.render.com
-   DB_USER=your-database-user
-   DB_PASSWORD=your-database-password
-   DB_NAME=bus_management
-   DB_PORT=3306
-   ```
+### Option B: separate variables
+```
+SECRET_KEY=your-random-secret-key
+MYSQL_HOST=hostname
+MYSQL_USER=user
+MYSQL_PASSWORD=password
+MYSQL_DB=database
+MYSQL_PORT=3306
+```
 
-3. **If using Render's Managed MySQL:**
-   - Go to your MySQL database service on Render
-   - Copy the "Internal Database URL" or "External Database URL"
-   - The format is usually: `mysql://user:password@hostname:port/database`
-   - Extract the values and set them as environment variables
+Alternative names are also supported by the app:
+```
+DB_HOST=hostname
+DB_USER=user
+DB_PASSWORD=password
+DB_NAME=database
+DB_PORT=3306
+```
 
-4. **After adding environment variables:**
-   - Click "Save Changes"
-   - Render will automatically redeploy your service
+Optional (recommended for production):
+```
+DIAGNOSTICS_TOKEN=any-random-string
+```
+This protects `/db-config` and `/test-db` in production (otherwise they return 404).
 
-### For Vercel:
+## Render
+1. Render Dashboard -> your Web Service
+2. Go to **Environment**
+3. Add the variables above (Option A or Option B)
+4. Click **Save Changes** (Render redeploys automatically)
 
-1. **Go to your Vercel Project Dashboard**
-   - Select your project
-   - Go to "Settings" → "Environment Variables"
+## Vercel
+1. Vercel Project -> **Settings** -> **Environment Variables**
+2. Add the variables above for Production/Preview/Development
+3. Redeploy
 
-2. **Add the same environment variables as above**
-
-3. **For each environment (Production, Preview, Development):**
-   - Add: `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`, `MYSQL_PORT`
-
-## Getting Database Connection Details
-
-### If using Render Managed MySQL:
-1. Go to your MySQL database service
-2. Under "Connections", you'll find:
-   - **Internal Database URL** (for services on Render)
-   - **External Database URL** (for external connections)
-3. Parse the URL to get individual values:
-   - Format: `mysql://user:password@hostname:port/database`
-   - Example: `mysql://user:pass@dpg-xxxxx-a.render.com:5432/bus_management`
-
-### If using external MySQL (like PlanetScale, AWS RDS, etc.):
-- Use the connection details provided by your database service
-- Make sure the database allows connections from your deployment platform
-
-## Testing the Connection
-
-After setting environment variables, check the deployment logs to see:
-- `Successfully connected to MySQL at hostname:port` (success)
-- Or error messages that will help diagnose the issue
-
-## Common Issues:
-
-1. **Still connecting to localhost:**
-   - Make sure environment variables are set correctly
-   - Check for typos in variable names
-   - Restart/redeploy your service after adding variables
-
-2. **Connection timeout:**
-   - Check if your database allows external connections
-   - Verify firewall/security group settings
-   - Use Internal Database URL if both services are on Render
-
-3. **Authentication failed:**
-   - Double-check username and password
-   - Ensure the user has proper permissions
-   - Verify the database name is correct
-
-## Local Development
-
-For local development, you can:
-1. Create a `.env` file in the project root:
-   ```
-   MYSQL_HOST=localhost
-   MYSQL_USER=root
-   MYSQL_PASSWORD=1239
-   MYSQL_DB=bus_management
-   MYSQL_PORT=3306
-   ```
-
-2. Or use the default values (localhost) when running locally
-
+## Local development
+1. Copy `.env.example` to `.env`
+2. Fill in your local MySQL values
+3. Run:
+   - `python app.py`

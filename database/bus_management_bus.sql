@@ -1,3 +1,4 @@
+USE railway;
 -- MySQL dump 10.13  Distrib 8.0.21, for Win64 (x86_64)
 --
 -- Host: localhost    Database: bus_management
@@ -32,7 +33,7 @@ CREATE TABLE `bus` (
   `fare` decimal(10,2) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `bus_number` (`bus_number`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -41,7 +42,7 @@ CREATE TABLE `bus` (
 
 LOCK TABLES `bus` WRITE;
 /*!40000 ALTER TABLE `bus` DISABLE KEYS */;
-INSERT INTO `bus` VALUES (1,'1','Kundapura','SMVITM College',0,40,30.00),(2,'2','Udupi','SMVITM College',7,35,20.00),(3,'3','Manipal','SMVITM College',20,45,25.00);
+INSERT INTO `bus` VALUES (1,'1','Kundapura','SMVITM College',0,40,30.00),(2,'2','Udupi','SMVITM College',7,35,20.00),(3,'3','Manipal','SMVITM College',20,45,25.00),(4,'4','Brahmavar','SMVITM College',6,40,28.00);
 /*!40000 ALTER TABLE `bus` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
