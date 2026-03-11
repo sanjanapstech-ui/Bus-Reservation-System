@@ -39,17 +39,26 @@ pip install -r requirements.txt
 
 4. Set up the MySQL database:
 - Create a new database named `bus_management`
-- Import the database schema from `database.sql`
+- Import the SQL dumps from `database/` (e.g. `bus_management_user.sql`, `bus_management_bus.sql`, etc.)
+  - Note: sample users/transactions are not included (create users by registering in the app)
 
-5. Configure the application:
-- Update the MySQL configuration in `app.py` with your database credentials
-- Set a secure secret key in the Flask application
+5. Configure environment variables:
+- For local dev: copy `.env.example` to `.env` and fill in values
+- For production: set these in your hosting provider dashboard:
+  - `SECRET_KEY`
+  - `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`, `MYSQL_PORT`
+  - (Optional) `DIAGNOSTICS_TOKEN` to protect `/test-db` and `/db-config`
 
 ## Running the Application
 
 1. Start the Flask development server:
 ```bash
 python app.py
+```
+
+For production (e.g. Render), use:
+```bash
+gunicorn app:app
 ```
 
 2. Open your web browser and navigate to:
